@@ -12,6 +12,8 @@ class MenuUISnapshotTests: XCTestCase {
     func test_menuUI_withNoMenuItems() {
         let sut = makeSUT(menuItems: [])
 
+        sut.loadViewIfNeeded()
+        
         assert(snapshot: sut.snapshot(for: .iPhone8(style: .light)), named: "EMPTY_MENU_UI_LIGHT")
         assert(snapshot: sut.snapshot(for: .iPhone8(style: .dark)), named: "EMPTY_MENU_UI_DARK")
     }
