@@ -30,14 +30,10 @@ class MenuUISnapshotTests: XCTestCase {
             .init(title: "item7", image: UIImage.make(with: .cyan), action: {}),
         ])
 
-        let navController = UINavigationController(rootViewController: sut)
-        navController.navigationBar.barTintColor = .blue
-        navController.navigationBar.isTranslucent = false
-
-        navController.loadViewIfNeeded()
-
-        assert(snapshot: navController.snapshot(for: .iPhone8(style: .light)), named: "MENU_UI_LIGHT")
-        assert(snapshot: navController.snapshot(for: .iPhone8(style: .dark)), named: "MENU_UI_DARK")
+        sut.loadViewIfNeeded()
+        
+        assert(snapshot: sut.snapshot(for: .iPhone8(style: .light)), named: "MENU_UI_LIGHT")
+        assert(snapshot: sut.snapshot(for: .iPhone8(style: .dark)), named: "MENU_UI_DARK")
     }
 
     // MARK: - Helpers
