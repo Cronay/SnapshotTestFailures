@@ -63,59 +63,75 @@ extension XCTestCase {
     }
 
     private func compare(_ old: UIImage, _ new: UIImage, precision: Float) -> Bool {
-      guard let oldCgImage = old.cgImage else { return false }
-      guard let newCgImage = new.cgImage else { return false }
-      guard oldCgImage.width != 0 else { return false }
-      guard newCgImage.width != 0 else { return false }
-      guard oldCgImage.width == newCgImage.width else { return false }
-      guard oldCgImage.height != 0 else { return false }
-      guard newCgImage.height != 0 else { return false }
-      guard oldCgImage.height == newCgImage.height else { return false }
-      // Values between images may differ due to padding to multiple of 64 bytes per row,
-      // because of that a freshly taken view snapshot may differ from one stored as PNG.
-      // At this point we're sure that size of both images is the same, so we can go with minimal `bytesPerRow` value
-      // and use it to create contexts.
-      let minBytesPerRow = min(oldCgImage.bytesPerRow, newCgImage.bytesPerRow)
-      let byteCount = minBytesPerRow * oldCgImage.height
+        Swift.assert(precision >= 0 && precision <= 1, "Precision has to be between 0 and 1")
+        
+        guard let oldCGImage = old.cgImage, let newCGImage = new.cgImage else { return false }
+        
+        guard haveSameDimensions(oldCGImage, newCGImage) else { return false }
+        
+        let minBytesPerRow = min(oldCGImage.bytesPerRow, newCGImage.bytesPerRow)
+        let byteCount = minBytesPerRow * oldCGImage.height
 
-      var oldBytes = [UInt8](repeating: 0, count: byteCount)
-      guard let oldContext = context(for: oldCgImage, bytesPerRow: minBytesPerRow, data: &oldBytes) else { return false }
-      guard let oldData = oldContext.data else { return false }
-      if let newContext = context(for: newCgImage, bytesPerRow: minBytesPerRow), let newData = newContext.data {
-        if memcmp(oldData, newData, byteCount) == 0 { return true }
-      }
-      let newer = UIImage(data: new.pngData()!)!
-      guard let newerCgImage = newer.cgImage else { return false }
-      var newerBytes = [UInt8](repeating: 0, count: byteCount)
-      guard let newerContext = context(for: newerCgImage, bytesPerRow: minBytesPerRow, data: &newerBytes) else { return false }
-      guard let newerData = newerContext.data else { return false }
-      if memcmp(oldData, newerData, byteCount) == 0 { return true }
-      if precision >= 1 { return false }
-      var differentPixelCount = 0
-      let threshold = 1 - precision
-      for byte in 0..<byteCount {
-        if oldBytes[byte] != newerBytes[byte] { differentPixelCount += 1 }
-        if Float(differentPixelCount) / Float(byteCount) > threshold { return false}
-      }
-      return true
+        var oldByteBuffer = [UInt8](repeating: 0, count: byteCount)
+        guard let oldDataPointer = dataPointer(for: oldCGImage, withBytesPerRow: minBytesPerRow, drawingDataInto: &oldByteBuffer) else { return false }
+        
+        if let newDataPointer = dataPointer(for: newCGImage, withBytesPerRow: minBytesPerRow),
+           dataInMemoryIsEqual(oldDataPointer, newDataPointer, byteCount: byteCount) {
+            return true
+        }
+        
+        let newer = UIImage(data: new.pngData()!)!
+        guard let newerCgImage = newer.cgImage else { return false }
+        
+        var newerByteBuffer = [UInt8](repeating: 0, count: byteCount)
+        guard let newerDataPointer = dataPointer(for: newerCgImage, withBytesPerRow: minBytesPerRow, drawingDataInto: &newerByteBuffer) else { return false }
+        
+        if dataInMemoryIsEqual(oldDataPointer, newerDataPointer, byteCount: byteCount) { return true }
+        
+        if precision >= 1 { return false }
+        
+        return comparePixelByPixel(oldByteBuffer, newerByteBuffer, with: precision, byteCount: byteCount)
     }
-
-    private func context(for cgImage: CGImage, bytesPerRow: Int, data: UnsafeMutableRawPointer? = nil) -> CGContext? {
-      guard
-        let space = cgImage.colorSpace,
-        let context = CGContext(
-          data: data,
-          width: cgImage.width,
-          height: cgImage.height,
-          bitsPerComponent: cgImage.bitsPerComponent,
-          bytesPerRow: bytesPerRow,
-          space: space,
-          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        )
+    
+    private func haveSameDimensions(_ old: CGImage, _ new: CGImage) -> Bool {
+        guard old.width != 0, new.width != 0 else { return false }
+        guard old.height != 0, new.height != 0 else { return false }
+        guard old.width == new.width, old.height == new.height else { return false }
+        return true
+    }
+    
+    private func dataPointer(for cgImage: CGImage, withBytesPerRow: Int, drawingDataInto buffer: UnsafeMutableRawPointer? = nil) -> UnsafeMutableRawPointer? {
+        guard
+            let space = cgImage.colorSpace,
+            let context = CGContext(
+                data: buffer,
+                width: cgImage.width,
+                height: cgImage.height,
+                bitsPerComponent: cgImage.bitsPerComponent,
+                bytesPerRow: withBytesPerRow,
+                space: space,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
         else { return nil }
-
-      context.draw(cgImage, in: CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
-      return context
+        
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
+        return context.data
     }
-
+    
+    private func dataInMemoryIsEqual(_ old: UnsafeMutableRawPointer, _ new: UnsafeMutableRawPointer, byteCount: Int) -> Bool {
+        memcmp(old, new, byteCount) == 0
+    }
+    
+    private func comparePixelByPixel(_ oldBuffer: [UInt8], _ newerBuffer: [UInt8], with precision: Float, byteCount: Int) -> Bool {
+        var mismatchedPixelCount = 0
+        let threshold = 1 - precision
+        
+        for byte in 0..<byteCount where oldBuffer[byte] != newerBuffer[byte] {
+            mismatchedPixelCount += 1
+            
+            if Float(mismatchedPixelCount) / Float(byteCount) > threshold { return false }
+        }
+        
+        return true
+    }
 }
